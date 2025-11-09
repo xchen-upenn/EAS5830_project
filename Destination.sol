@@ -63,8 +63,8 @@ contract Destination is AccessControl {
 
         // Store mappings
 
-        wrapped_tokens[_underlying_token] = address(wrapped);
-        underlying_tokens[address(wrapped)] = _underlying_token;
+        underlying_tokens[_underlying_token] = address(wrapped);
+		wrapped_tokens[address(wrapped)] = _underlying_token;
         
         //tokens.push(address(wrapped));
 
