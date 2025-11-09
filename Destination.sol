@@ -55,9 +55,10 @@ contract Destination is AccessControl {
 
 		// Deploy a new BridgeToken
         BridgeToken wrapped = new BridgeToken(
-            name,
-            symbol,
-            _underlying_token
+            _underlying_token,
+        	name,
+        	symbol,
+        	address(this)
         );
 
         // Store mappings
