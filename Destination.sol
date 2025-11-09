@@ -24,27 +24,27 @@ contract Destination is AccessControl {
 
 	function wrap(address _underlying_token, address _recipient, uint256 _amount ) public onlyRole(WARDEN_ROLE) {
 		//YOUR CODE HERE
-		address wrapped_token = underlying_tokens[_underlying_token];
-        require(wrapped_token != address(0), "Token not registered");
+		// Look up wrapped token by underlying
+    address wrapped_token = wrapped_tokens[_underlying_token];
+    require(wrapped_token != address(0), "Token not registered");
 
-        BridgeToken token = BridgeToken(wrapped_token);
-        token.mint(_recipient, _amount);
+    // Mint wrapped tokens
+    BridgeToken(wrapped_token).mint(_recipient, _amount);
 
-        emit Wrap(_underlying_token, wrapped_token, _recipient, _amount);
-    }
+    emit Wrap(_underlying_token, wrapped_token, _recipient, _amount);
+}
 
 	function unwrap(address _wrapped_token, address _recipient, uint256 _amount ) public {
 		//YOUR CODE HERE
-		address underlying = wrapped_tokens[_wrapped_token];
-        require(underlying != address(0), "Unknown wrapped token");
+		// Look up underlying token by wrapped
+    address underlying = underlying_tokens[_wrapped_token];
+    require(underlying != address(0), "Unknown wrapped token");
 
-        BridgeToken token = BridgeToken(_wrapped_token);
+    // Burn wrapped tokens from caller
+    BridgeToken(_wrapped_token).burnFrom(msg.sender, _amount);
 
-        // Burn tokens from the caller
-        token.burnFrom(msg.sender, _amount);
-
-        emit Unwrap(underlying, _wrapped_token, msg.sender, _recipient, _amount);
-    }
+    emit Unwrap(underlying, _wrapped_token, msg.sender, _recipient, _amount);
+}
 
 	function createToken(address _underlying_token, string memory name, string memory symbol ) public onlyRole(CREATOR_ROLE) returns(address) {
 		//YOUR CODE HERE
@@ -55,7 +55,7 @@ contract Destination is AccessControl {
 
 		// Deploy a new BridgeToken
         BridgeToken wrapped = new BridgeToken(
-            _underlying_token,
+          _underlying_token,
         	name,
         	symbol,
         	address(this)
@@ -63,9 +63,10 @@ contract Destination is AccessControl {
 
         // Store mappings
 
-        underlying_tokens[_underlying_token] = address(wrapped);
-		wrapped_tokens[address(wrapped)] = _underlying_token;
+        underlying_tokens[address(wrapped)] = _underlying_token;
+		    wrapped_tokens[_underlying_token] = address(wrapped);
         
+
         //tokens.push(address(wrapped));
 
         emit Creation(_underlying_token, address(wrapped));
