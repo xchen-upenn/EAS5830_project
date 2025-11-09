@@ -49,7 +49,7 @@ contract Destination is AccessControl {
 	function createToken(address _underlying_token, string memory name, string memory symbol ) public onlyRole(CREATOR_ROLE) returns(address) {
 		//YOUR CODE HERE
 		require(
-            underlying_tokens[_underlying_token] == address(0),
+            wrapped_tokens[_underlying_token] == address(0),
             "Token already created"
         );
 
@@ -62,8 +62,10 @@ contract Destination is AccessControl {
         );
 
         // Store mappings
-        underlying_tokens[_underlying_token] = address(wrapped);
-        wrapped_tokens[address(wrapped)] = _underlying_token;
+
+        wrapped_tokens[_underlying_token] = address(wrapped);
+        underlying_tokens[address(wrapped)] = _underlying_token;
+        
         tokens.push(address(wrapped));
 
         emit Creation(_underlying_token, address(wrapped));
@@ -71,5 +73,3 @@ contract Destination is AccessControl {
     }
 
 }
-
-
