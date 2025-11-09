@@ -58,7 +58,7 @@ contract Destination is AccessControl {
             _underlying_token,
         	name,
         	symbol,
-        	address(this)
+        	msg.sender
         );
 
         // Store mappings
