@@ -8,6 +8,8 @@ contract Source is AccessControl {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant WARDEN_ROLE = keccak256("BRIDGE_WARDEN_ROLE");
 	mapping( address => bool) public approved;
+	mapping(address => address) public wrappedTokens;
+
 	address[] public tokens;
 
 	event Deposit( address indexed token, address indexed recipient, uint256 amount );
