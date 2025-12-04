@@ -36,13 +36,17 @@ contract Source is AccessControl {
 		emit Withdrawal(_token, _recipient, _amount);
 	}
 
-	function registerToken(address _token) onlyRole(ADMIN_ROLE) public {
-		//YOUR CODE HERE
-		require(!approved[_token], "token already registered");
-		approved[_token] = true;
-		tokens.push(_token);
-		emit Registration(_token);
+	function registerToken(address _token, address _wrapped) onlyRole(ADMIN_ROLE) public {
+
+	    require(!approved[_token], "token already registered");
+
+    	approved[_token] = true;
+    	wrappedTokens[_token] = _wrapped;
+    	tokens.push(_token);
+
+    	emit Registration(_token);
 	}
+
 
 
 }
