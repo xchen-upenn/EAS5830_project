@@ -11,7 +11,7 @@ def connect_to(chain):
         api_url = f"https://api.avax-test.network/ext/bc/C/rpc" #AVAX C-chain testnet
 
     if chain == 'destination':  # The destination contract chain is bsc
-        api_url = f"https://data-seed-prebsc-1-s1.binance.org:8545/" #BSC testnet
+        api_url = f"https://bsc-testnet.publicnode.com" #BSC testnet
 
     if chain in ['source','destination']:
         w3 = Web3(Web3.HTTPProvider(api_url))
