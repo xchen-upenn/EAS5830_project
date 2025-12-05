@@ -29,6 +29,30 @@ def register_and_create_tokens(contract_info_file="contract_info.json", erc20_cs
     df = pd.read_csv(erc20_csv)
     token_addresses = df['tokenID'].tolist()
 
+    # --- SOURCE CONTRACT: register tokens ---
+    w3_source = connect_to('source')
+    source_info = get_contract_info('source', contract_info_file)
+    source_contract = w3_source.eth.contract(
+        address=Web3.to_checksum_address(source_info["address"]),
+        abi=source_info["abi"]
+    )
+    source_key = source_info.get("warden_private_key")
+    source_account = w3_source.eth.account.from_key(source_key)
+    source_nonce = w3_source.eth.get_transaction_count(source_account.address)
+
+    for i, token in enumerate(token_addresses):
+        token = Web3.to_checksum_address(token)
+        fn = source_contract.functions.registerToken(token)
+        tx_dict = fn.build_transaction({
+            'from': source_account.address,
+            'nonce': source_nonce + i,
+            'gas': 200000,
+            'gasPrice': w3_source.eth.gas_price
+        })
+        signed = w3_source.eth.account.sign_transaction(tx_dict, private_key=source_key)
+        tx_hash = w3_source.eth.send_raw_transaction(signed.rawTransaction)
+        print(f"[SOURCE] Registered token {token}, tx hash: {tx_hash.hex()}")
+    
     # --- DESTINATION CONTRACT: create tokens ---
     w3_dest = connect_to('destination')
     dest_info = get_contract_info('destination', contract_info_file)
