@@ -1,40 +1,68 @@
 from web3 import Web3
 from web3.providers.rpc import HTTPProvider
-from web3.middleware import ExtraDataToPOAMiddleware #Necessary for POA chains
+from web3.middleware import ExtraDataToPOAMiddleware
 from datetime import datetime
 import json
 import pandas as pd
 
-
 def connect_to(chain):
-    if chain == 'source':  # The source contract chain is avax
-        api_url = f"https://api.avax-test.network/ext/bc/C/rpc" #AVAX C-chain testnet
+    if chain == 'source':  # AVAX C-chain testnet
+        api_url = f"https://api.avax-test.network/ext/bc/C/rpc"
+    elif chain == 'destination':  # BSC testnet
+        api_url = f"https://bsc-testnet.publicnode.com"
+    else:
+        raise ValueError(f"Unknown chain: {chain}")
 
-    if chain == 'destination':  # The destination contract chain is bsc
-        api_url = f"https://bsc-testnet.publicnode.com" #BSC testnet
-
-    if chain in ['source','destination']:
-        w3 = Web3(Web3.HTTPProvider(api_url))
-        # inject the poa compatibility middleware to the innermost layer
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+    w3 = Web3(Web3.HTTPProvider(api_url))
+    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     return w3
 
 
-def get_contract_info(chain, contract_info):
-    """
-        Load the contract_info file into a dictionary
-        This function is used by the autograder and will likely be useful to you
-    """
-    try:
-        with open(contract_info, 'r')  as f:
-            contracts = json.load(f)
-    except Exception as e:
-        print( f"Failed to read contract info\nPlease contact your instructor\n{e}" )
-        return 0
+def get_contract_info(chain, contract_info_file="contract_info.json"):
+    with open(contract_info_file, 'r') as f:
+        contracts = json.load(f)
     return contracts[chain]
 
 
+def register_and_create_tokens(contract_info_file="contract_info.json", erc20_csv="erc20s.csv"):
+    # Load tokens
+    df = pd.read_csv(erc20_csv)
+    token_addresses = df['tokenID'].tolist()
 
+    # --- DESTINATION CONTRACT: create tokens ---
+    w3_dest = connect_to('destination')
+    dest_info = get_contract_info('destination', contract_info_file)
+    dest_contract = w3_dest.eth.contract(
+        address=Web3.to_checksum_address(dest_info["address"]),
+        abi=dest_info["abi"]
+    )
+    dest_key = dest_info.get("warden_private_key")
+    dest_account = w3_dest.eth.account.from_key(dest_key)
+    dest_nonce = w3_dest.eth.get_transaction_count(dest_account.address)
+
+    for i, token in enumerate(token_addresses):
+        token = Web3.to_checksum_address(token)
+        # Provide token name and symbol if needed
+        name = f"Token{i+1}"
+        symbol = f"T{i+1}"
+        fn = dest_contract.functions.createToken(token, name, symbol)
+        tx_dict = fn.build_transaction({
+            'from': dest_account.address,
+            'nonce': dest_nonce + i,
+            'gas': 300000,
+            'gasPrice': w3_dest.eth.gas_price
+        })
+        signed = w3_dest.eth.account.sign_transaction(tx_dict, private_key=dest_key)
+        tx_hash = w3_dest.eth.send_raw_transaction(signed.raw_transaction)
+        print(f"[DEST] Created token {token}, tx hash: {tx_hash.hex()}")
+
+
+# Call this once at the start of your bridge.py
+register_and_create_tokens()
+
+# --------------------------
+# Rest of your scan_blocks() code remains unchanged
+# --------------------------
 def scan_blocks(chain, contract_info="contract_info.json"):
     """
         chain - (string) should be either "source" or "destination"
