@@ -70,8 +70,8 @@ def register_and_create_tokens():
 
     for i, token in enumerate(token_addresses):
         token = Web3.to_checksum_address(token)
-        name = f"Token{i+1}"
-        symbol = f"T{i+1}"
+        name = "whatname"
+        symbol = "whatsymbol"
         tx = dest_contract.functions.createToken(token, name, symbol).build_transaction({
             'from': dest_address,
             'nonce': dest_nonce + i,
