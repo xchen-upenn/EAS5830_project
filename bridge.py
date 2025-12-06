@@ -42,28 +42,37 @@ def get_contract_info(chain, contract_info):
 
 
 # --- SCAN BLOCKS & TRIGGER BRIDGE ---
-def scan_blocks(chain):
+def scan_blocks(chain, contract_info="contract_info.json"):
+    """
+    Scan last SCAN_BLOCKS blocks on the source/destination chain,
+    detect Deposit/Unwrap events, and call wrap/withdraw on the opposite chain.
+    """
     if chain not in ['source', 'destination']:
         print(f"Invalid chain: {chain}")
-        return None
-    
-    w3 = connect_to(chain)
-    this_info = get_contract_info(chain)
-    opp_chain = 'destination' if chain == 'source' else 'source'
-    opp_info = get_contract_info(opp_chain)
+        return 0
 
+    # Connect to this chain and load contract
+    w3 = connect_to(chain)
+    this_info = get_contract_info(chain, contract_info)
     this_contract = w3.eth.contract(
         address=Web3.to_checksum_address(this_info["address"]),
         abi=this_info["abi"]
     )
+
+    # Connect to opposite chain
+    opp_chain = 'destination' if chain == 'source' else 'source'
     w3_opp = connect_to(opp_chain)
+    opp_info = get_contract_info(opp_chain, contract_info)
     opp_contract = w3_opp.eth.contract(
         address=Web3.to_checksum_address(opp_info["address"]),
         abi=opp_info["abi"]
     )
+
+    # Opposite account (for sending transactions)
     opp_key = opp_info.get("warden_private_key")
     opp_account = w3_opp.eth.account.from_key(opp_key) if opp_key else None
 
+    # Determine which events and functions to handle
     if chain == 'source':
         event_obj = this_contract.events.Deposit
         target_fn = 'wrap'
@@ -71,14 +80,15 @@ def scan_blocks(chain):
         event_obj = this_contract.events.Unwrap
         target_fn = 'withdraw'
 
+    # Scan last SCAN_BLOCKS blocks
     latest = w3.eth.block_number
     start_block = max(0, latest - SCAN_BLOCKS)
-
     try:
         events = event_obj.create_filter(fromBlock=start_block, toBlock=latest).get_all_entries()
     except:
         events = []
 
+    # Process each event
     for evt in events:
         args = evt.args
         if chain == 'source':
@@ -92,8 +102,9 @@ def scan_blocks(chain):
             amount = int(args["amount"])
             call_args = (underlying, recipient, amount)
 
+        # Call the target function on opposite chain
         if opp_account:
-            nonce = w3_opp.eth.get_transaction_count(opp_account.address)
+            nonce = w3_opp.eth.get_transaction_count(opp_account.address, "pending")
             tx = getattr(opp_contract.functions, target_fn)(*call_args).build_transaction({
                 'from': opp_account.address,
                 'nonce': nonce,
@@ -103,3 +114,5 @@ def scan_blocks(chain):
             signed = w3_opp.eth.account.sign_transaction(tx, private_key=opp_key)
             tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
             print(f"[{opp_chain}] Called {target_fn} -> tx: {tx_hash.hex()}")
+
+    print(f"[{chain}] Scanned blocks {start_block}-{latest}, {len(events)} events processed.")
