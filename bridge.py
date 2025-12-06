@@ -1,35 +1,52 @@
 from web3 import Web3
-#from web3.middleware import geth_poa_middleware
+from web3.providers.rpc import HTTPProvider
+from web3.middleware import ExtraDataToPOAMiddleware  # Necessary for POA chains
+from datetime import datetime
 import json
 import pandas as pd
-import time
 
-# --- CONFIG ---
-CONTRACT_INFO_FILE = "contract_info.json"
-ERC20_CSV = "erc20s.csv"
-SCAN_BLOCKS = 5  # last N blocks to scan per run
-SLEEP_INTERVAL = 5  # seconds between scans (if looping)
 
-# --- CONNECT ---
 def connect_to(chain):
-    if chain == 'source':  # AVAX C-chain testnet
-        w3 = Web3(Web3.HTTPProvider("https://api.avax-test.network/ext/bc/C/rpc"))
-    elif chain == 'destination':  # BSC testnet
-        w3 = Web3(Web3.HTTPProvider("https://bsc-testnet.publicnode.com"))
+    """Connect to the blockchain specified by 'chain'."""
+    if chain == 'source':  # The source contract chain is AVAX
+        api_url = "https://api.avax-test.network/ext/bc/C/rpc"  # AVAX C-chain testnet
+
+    elif chain == 'destination':  # The destination contract chain is BSC
+        api_url = "https://data-seed-prebsc-1-s1.binance.org:8545/"  # BSC testnet
+
     else:
         raise ValueError(f"Unknown chain: {chain}")
-#   if USE_POA:
-#       w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+
+    w3 = Web3(Web3.HTTPProvider(api_url))
+    # Inject the POA compatibility middleware to the innermost layer
+    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+
     return w3
 
-# --- LOAD CONTRACT INFO ---
-def get_contract_info(chain):
-    with open(CONTRACT_INFO_FILE, "r") as f:
-        data = json.load(f)
-    return data[chain]
+
+def get_contract_info(chain, contract_info):
+    """
+    Load the contract_info file into a dictionary.
+
+    This function is used by the autograder and will likely be useful to you.
+    """
+    try:
+        with open(contract_info, 'r') as f:
+            contracts = json.load(f)
+    except Exception as e:
+        print(f"Failed to read contract info\nPlease contact your instructor\n{e}")
+        return None
+
+    return contracts.get(chain)
+
+
 
 # --- SCAN BLOCKS & TRIGGER BRIDGE ---
 def scan_blocks(chain):
+    if chain not in ['source', 'destination']:
+        print(f"Invalid chain: {chain}")
+        return None
+    
     w3 = connect_to(chain)
     this_info = get_contract_info(chain)
     opp_chain = 'destination' if chain == 'source' else 'source'
