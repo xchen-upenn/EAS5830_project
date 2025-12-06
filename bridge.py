@@ -51,11 +51,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Invalid chain: {chain}")
         return 0
 
-    # Number of blocks to scan (hardcoded locally)
-    num_blocks_to_scan = 5
-
-    
-    # Connect to this chain and load contract
+    # Connect to this chain
     w3 = connect_to(chain)
     this_info = get_contract_info(chain, contract_info)
     this_contract = w3.eth.contract(
@@ -72,49 +68,57 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         abi=opp_info["abi"]
     )
 
-    # Opposite account (for sending transactions)
+    # Opposite account for sending txs
     opp_key = opp_info.get("warden_private_key")
-    opp_account = w3_opp.eth.account.from_key(opp_key) if opp_key else None
+    if not opp_key:
+        print(f"No warden key found for {opp_chain}")
+        return 0
+    opp_account = w3_opp.eth.account.from_key(opp_key)
 
-    # Determine which events and functions to handle
+    # Determine event & target function
     if chain == 'source':
         event_obj = this_contract.events.Deposit
         target_fn = 'wrap'
+        last_n_blocks = 20
     else:
         event_obj = this_contract.events.Unwrap
         target_fn = 'withdraw'
+        last_n_blocks = 20
 
-    # Scan last num_blocks_to_scan blocks
-    latest = w3.eth.block_number
-    start_block = max(0, latest - num_blocks_to_scan)
+    latest_block = w3.eth.block_number
+    start_block = max(0, latest_block - last_n_blocks)
+
     try:
-        events = event_obj.create_filter(fromBlock=start_block, toBlock=latest).get_all_entries()
-    except:
+        events = event_obj.create_filter(fromBlock=start_block, toBlock=latest_block).get_all_entries()
+    except Exception as e:
+        print(f"No events found: {e}")
         events = []
 
-    # Process each event
     for evt in events:
         args = evt.args
         if chain == 'source':
-            token = Web3.to_checksum_address(args["token"])
-            recipient = Web3.to_checksum_address(args["recipient"])
-            amount = int(args["amount"])
-            call_args = (token, recipient, amount)
+            call_args = (
+                Web3.to_checksum_address(args["token"]),
+                Web3.to_checksum_address(args["recipient"]),
+                int(args["amount"])
+            )
         else:
-            underlying = Web3.to_checksum_address(args["underlying_token"])
-            recipient = Web3.to_checksum_address(args["to"])
-            amount = int(args["amount"])
-            call_args = (underlying, recipient, amount)
+            call_args = (
+                Web3.to_checksum_address(args["underlying_token"]),
+                Web3.to_checksum_address(args["to"]),
+                int(args["amount"])
+            )
 
-        # Call the target function on opposite chain
-        if opp_account:
-            nonce = w3_opp.eth.get_transaction_count(opp_account.address, "pending")
-            tx = getattr(opp_contract.functions, target_fn)(*call_args).build_transaction({
-                'from': opp_account.address,
-                'nonce': nonce,
-                'gas': 300000,
-                'gasPrice': w3_opp.eth.gas_price
-            })
-            signed = w3_opp.eth.account.sign_transaction(tx, private_key=opp_key)
-            tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
-            print(f"[{opp_chain}] Called {target_fn} -> tx: {tx_hash.hex()}")
+        # Send tx to opposite chain
+        nonce = w3_opp.eth.get_transaction_count(opp_account.address, "pending")
+        tx = getattr(opp_contract.functions, target_fn)(*call_args).build_transaction({
+            'from': opp_account.address,
+            'nonce': nonce,
+            'gas': 500_000,
+            'gasPrice': w3_opp.eth.gas_price
+        })
+        signed = opp_account.sign_transaction(tx)
+        tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
+        print(f"[{opp_chain}] Called {target_fn} -> tx: {tx_hash.hex()}")
+
+    print(f"[{chain}] Scanned blocks {start_block}-{latest_block}, processed {len(events)} events.")
