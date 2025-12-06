@@ -76,7 +76,7 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
 
     # Connect to this chain
     w3 = connect_to(chain)
-    this_info = get_contract_info(contract_info_file, chain)
+    this_info = get_contract_info(chain, contract_info_file)
     this_contract = w3.eth.contract(
         address=Web3.to_checksum_address(this_info["address"]),
         abi=this_info["abi"]
@@ -85,7 +85,7 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
     # Connect to opposite chain
     opp_chain = 'destination' if chain == 'source' else 'source'
     w3_opp = connect_to(opp_chain)
-    opp_info = get_contract_info(contract_info_file, opp_chain)
+    opp_info = get_contract_info(opp_chain, contract_info_file)
     opp_contract = w3_opp.eth.contract(
         address=Web3.to_checksum_address(opp_info["address"]),
         abi=opp_info["abi"]
