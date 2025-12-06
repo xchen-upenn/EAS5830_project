@@ -20,7 +20,8 @@ def connect_to(chain):
         w3 = Web3(Web3.HTTPProvider("https://bsc-testnet.publicnode.com"))
     else:
         raise ValueError(f"Unknown chain: {chain}")
-    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    if USE_POA:
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
     return w3
 
 # --- LOAD CONTRACT INFO ---
