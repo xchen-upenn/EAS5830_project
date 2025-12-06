@@ -27,61 +27,6 @@ def get_contract_info(chain):
         data = json.load(f)
     return data[chain]
 
-# --- REGISTER AND CREATE TOKENS ---
-def register_and_create_tokens():
-    df = pd.read_csv(ERC20_CSV)
-    token_addresses = df['tokenID'].tolist()
-
-    # --- SOURCE ---
-    w3_source = connect_to('source')
-    source_info = get_contract_info('source')
-    source_contract = w3_source.eth.contract(
-        address=Web3.to_checksum_address(source_info["address"]),
-        abi=source_info["abi"]
-    )
-    source_key = source_info["warden_private_key"]
-    source_account = w3_source.eth.account.from_key(source_key)
-    source_address = source_account.address
-    source_nonce = w3_source.eth.get_transaction_count(source_address)
-
-    for i, token in enumerate(token_addresses):
-        token = Web3.to_checksum_address(token)
-        tx = source_contract.functions.registerToken(token).build_transaction({
-            'from': source_address,
-            'nonce': source_nonce + i,
-            'gas': 200000,
-            'gasPrice': w3_source.eth.gas_price
-        })
-        signed = w3_source.eth.account.sign_transaction(tx, private_key=source_key)
-        tx_hash = w3_source.eth.send_raw_transaction(signed.raw_transaction)
-        print(f"[SOURCE] Registered {token}, tx: {tx_hash.hex()}")
-
-    # --- DESTINATION ---
-    w3_dest = connect_to('destination')
-    dest_info = get_contract_info('destination')
-    dest_contract = w3_dest.eth.contract(
-        address=Web3.to_checksum_address(dest_info["address"]),
-        abi=dest_info["abi"]
-    )
-    dest_key = dest_info["warden_private_key"]
-    dest_account = w3_dest.eth.account.from_key(dest_key)
-    dest_address = dest_account.address
-    dest_nonce = w3_dest.eth.get_transaction_count(dest_address)
-
-    for i, token in enumerate(token_addresses):
-        token = Web3.to_checksum_address(token)
-        name = "whatname"
-        symbol = "whatsymbol"
-        tx = dest_contract.functions.createToken(token, name, symbol).build_transaction({
-            'from': dest_address,
-            'nonce': dest_nonce + i,
-            'gas': 300000,
-            'gasPrice': w3_dest.eth.gas_price
-        })
-        signed = w3_dest.eth.account.sign_transaction(tx, private_key=dest_key)
-        tx_hash = w3_dest.eth.send_raw_transaction(signed.raw_transaction)
-        print(f"[DEST] Created {token}, tx: {tx_hash.hex()}")
-
 # --- SCAN BLOCKS & TRIGGER BRIDGE ---
 def scan_blocks(chain):
     w3 = connect_to(chain)
