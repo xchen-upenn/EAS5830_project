@@ -103,12 +103,3 @@ def scan_blocks(chain):
             signed = w3_opp.eth.account.sign_transaction(tx, private_key=opp_key)
             tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
             print(f"[{opp_chain}] Called {target_fn} -> tx: {tx_hash.hex()}")
-
-# --- MAIN ---
-if __name__ == "__main__":
-    # 1. Register & create tokens
-    register_and_create_tokens()
-
-    # 2. Scan both chains once (autograder expects actual txs)
-    scan_blocks('source')
-    scan_blocks('destination')
