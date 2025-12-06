@@ -74,14 +74,13 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
         print(f"Invalid chain: {chain}")
         return
 
-    # Load contract info
-    this_info = get_contract_info(chain, contract_info)
+    this_info = get_contract_info(chain, contract_info_file)
     if not this_info:
         print("Failed to read contract info")
         return
 
     opp_chain = 'destination' if chain == 'source' else 'source'
-    opp_info = get_contract_info(opp_chain, contract_info)
+    opp_info = get_contract_info(opp_chain, contract_info_file)
     if not opp_info:
         print("Failed to read opposite contract info")
         return
@@ -115,7 +114,7 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
         event_obj = this_contract.events.Unwrap
         target_fn = 'withdraw'
 
-    # Scan recent 5 blocks (autograder expects last N blocks)
+    # Scan last 5 blocks
     latest = w3.eth.block_number
     start_block = max(0, latest - 5)
 
