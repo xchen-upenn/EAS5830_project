@@ -51,6 +51,10 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Invalid chain: {chain}")
         return 0
 
+    # Number of blocks to scan (hardcoded locally)
+    num_blocks_to_scan = 5
+
+    
     # Connect to this chain and load contract
     w3 = connect_to(chain)
     this_info = get_contract_info(chain, contract_info)
@@ -80,9 +84,9 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         event_obj = this_contract.events.Unwrap
         target_fn = 'withdraw'
 
-    # Scan last SCAN_BLOCKS blocks
+    # Scan last num_blocks_to_scan blocks
     latest = w3.eth.block_number
-    start_block = max(0, latest - SCAN_BLOCKS)
+    start_block = max(0, latest - num_blocks_to_scan)
     try:
         events = event_obj.create_filter(fromBlock=start_block, toBlock=latest).get_all_entries()
     except:
@@ -114,5 +118,3 @@ def scan_blocks(chain, contract_info="contract_info.json"):
             signed = w3_opp.eth.account.sign_transaction(tx, private_key=opp_key)
             tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
             print(f"[{opp_chain}] Called {target_fn} -> tx: {tx_hash.hex()}")
-
-    print(f"[{chain}] Scanned blocks {start_block}-{latest}, {len(events)} events processed.")
