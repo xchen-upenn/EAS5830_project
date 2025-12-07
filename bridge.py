@@ -87,16 +87,15 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
     # ----------- Event selection + event signature --------------
     if chain == "source":
         event_class = this_contract.events.Deposit
-        event_sig = "Deposit(address,address,uint256)"
+        topic0 = event_class()._get_event_topic()
         target_fn = opp_contract.functions.wrap
         event_name = "Deposit"
-        indexed_count = 2       # token, recipient
     else:
         event_class = this_contract.events.Unwrap
-        event_sig = "Unwrap(address,address,address,address,uint256)"
+        topic0 = event_class()._get_event_topic()
         target_fn = opp_contract.functions.withdraw
         event_name = "Unwrap"
-        indexed_count = 3       # underlying_token, wrapped_token, to
+
 
     # Compute topic0 properly
     topic0 = Web3.keccak(text=event_sig).hex()
