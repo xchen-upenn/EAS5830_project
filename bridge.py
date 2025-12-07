@@ -60,15 +60,11 @@ def register_and_create_tokens(contract_info_file: str = "contract_info.json",
 # -------------------------------
 def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     """
-    chain - (string) should be either "source" or "destination"
-
-    Scan the last 5 blocks of the source and destination chains.
-    Look for 'Deposit' events on the source chain and 'Unwrap' events on the destination chain.
-    When Deposit events are found on the source chain, call the 'wrap' function on the destination chain.
-    When Unwrap events are found on the destination chain, call the 'withdraw' function on the source chain.
+    Scan last 5 blocks for:
+      - Deposit events on source → call wrap() on destination
+      - Unwrap events on destination → call withdraw() on source
     """
 
-    # Template requirement:
     if chain not in ["source", "destination"]:
         print(f"Invalid chain: {chain}")
         return 0
@@ -78,13 +74,13 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     # ---------------------------
     this_info = get_contract_info(chain, contract_info_file)
     if not this_info:
-        print("Failed to read contract info for", chain)
+        print(f"Failed to read contract info for {chain}")
         return 0
 
     opp_chain = "destination" if chain == "source" else "source"
     opp_info = get_contract_info(opp_chain, contract_info_file)
     if not opp_info:
-        print("Failed to read contract info for", opp_chain)
+        print(f"Failed to read contract info for {opp_chain}")
         return 0
 
     # ---------------------------
@@ -94,19 +90,18 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     w3_opp = connect_to(opp_chain)
 
     # ---------------------------
-    # Build contract objects
+    # Contract objects
     # ---------------------------
     this_contract = w3.eth.contract(
         address=Web3.to_checksum_address(this_info["address"]),
         abi=this_info["abi"],
     )
-
     opp_contract = w3_opp.eth.contract(
         address=Web3.to_checksum_address(opp_info["address"]),
         abi=opp_info["abi"],
     )
 
-    # Warden key/account used to send transactions on opposite chain
+    # Warden key for opposite chain
     opp_key = opp_info.get("warden_private_key")
     if not opp_key:
         print(f"No warden_private_key found for {opp_chain}")
@@ -115,19 +110,23 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     opp_acct = w3_opp.eth.account.from_key(opp_key)
 
     # ---------------------------
-    # Decide which event to read
-    # and which function to call
+    # Select event + target function
     # ---------------------------
     if chain == "source":
-        # Read Deposit(token, recipient, amount) on source
-        event_name = "Deposit"
-        # Call wrap(underlying_token, recipient, amount) on destination
+        # Deposit(token, recipient, amount)
+        event_class = this_contract.events.Deposit
+        event_abi = event_class().abi
         target_fn = opp_contract.functions.wrap
+        event_name = "Deposit"
     else:
-        # Read Unwrap(underlying_token, wrapped_token, frm, to, amount) on destination
-        event_name = "Unwrap"
-        # Call withdraw(token, recipient, amount) on source
+        # Unwrap(underlying_token, wrapped_token, frm, to, amount)
+        event_class = this_contract.events.Unwrap
+        event_abi = event_class().abi
         target_fn = opp_contract.functions.withdraw
+        event_name = "Unwrap"
+
+    # Event signature for topics[0]
+    topic0 = event_abi["signature"]
 
     # ---------------------------
     # Block range: last 5 blocks
@@ -135,87 +134,25 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     latest = w3.eth.block_number
     start_block = max(0, latest - 5)
 
-    print(f"[{chain}] Scanned blocks {start_block}-{latest}", end="")
+    print(f"[{chain}] Scanning blocks {start_block}-{latest}")
 
     # ---------------------------
-    # Fetch logs manually per block
-    # using w3.eth.get_logs with a dict
-    # (avoids fromBlock/from_block keyword issues)
+    # Fetch logs block-by-block
+    # WITH topic0 filter (CRITICAL FIX!)
     # ---------------------------
-    logs = []
+    raw_logs = []
+
     for blk in range(start_block, latest + 1):
         filter_params = {
             "fromBlock": blk,
             "toBlock": blk,
             "address": Web3.to_checksum_address(this_info["address"]),
+            "topics": [topic0],     # <-- Absolutely required
         }
         try:
-            blk_logs = w3.eth.get_logs(filter_params)
-            logs.extend(blk_logs)
-        except Exception as e:
-            # Some RPCs may throw limit or other transient errors; skip this block
-            print(f"\n[{chain}] Warning: get_logs failed for block {blk}: {e}")
-            continue
+            block_logs = w3.eth.get_logs(filter_params)
+            raw_logs.extend(block_log
 
-    print(f", {len(logs)} raw logs found.")
-
-    # ---------------------------
-    # Decode logs with the correct event
-    # ---------------------------
-    events = []
-    for log in logs:
-        try:
-            if chain == "source":
-                evt = this_contract.events.Deposit().process_log(log)
-            else:
-                evt = this_contract.events.Unwrap().process_log(log)
-            events.append(evt)
-        except Exception:
-            # Not a matching event, skip
-            continue
-
-    print(f"[{chain}] {len(events)} {event_name} events decoded.")
-
-    # ---------------------------
-    # For each event, build & send tx
-    # ---------------------------
-    for evt in events:
-        args = evt["args"]
-
-        if chain == "source":
-            # Deposit(token, recipient, amount)
-            token = Web3.to_checksum_address(args["token"])
-            recipient = Web3.to_checksum_address(args["recipient"])
-            amount = int(args["amount"])
-        else:
-            # Unwrap(underlying_token, wrapped_token, frm, to, amount)
-            token = Web3.to_checksum_address(args["underlying_token"])
-            recipient = Web3.to_checksum_address(args["to"])
-            amount = int(args["amount"])
-
-        print(f"[{chain}] {event_name} -> token={token}, recipient={recipient}, amount={amount}")
-
-        try:
-            # Get nonce on opposite chain
-            nonce = w3_opp.eth.get_transaction_count(opp_acct.address, "pending")
-
-            # Build tx to call wrap/withdraw on opposite contract
-            tx = target_fn(token, recipient, amount).build_transaction({
-                "from": opp_acct.address,
-                "nonce": nonce,
-                "gas": 500_000,
-                "gasPrice": w3_opp.eth.gas_price,
-            })
-
-            # Sign & send
-            signed = w3_opp.eth.account.sign_transaction(tx, opp_key)
-            tx_hash = w3_opp.eth.send_raw_transaction(signed.raw_transaction)
-            print(f"[{opp_chain}] Sent {target_fn.fn_name} tx: {tx_hash.hex()}")
-
-        except Exception as e:
-            print(f"[{opp_chain}] Transaction failed: {e}")
-
-    return 1
 
 
 # Optional manual test
