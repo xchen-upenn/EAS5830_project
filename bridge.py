@@ -1,45 +1,43 @@
 from web3 import Web3
 from web3.providers.rpc import HTTPProvider
 from web3.middleware import ExtraDataToPOAMiddleware
-from datetime import datetime
 import json
 import pandas as pd
 
 
-# ---------------------------------------------------
+# ---------------------------------------------------------
 # CONNECT
-# ---------------------------------------------------
+# ---------------------------------------------------------
 def connect_to(chain):
-    """Connect to the blockchain specified by 'chain'."""
-    if chain == "source":   # AVAX testnet
+    if chain == "source":
         api_url = "https://api.avax-test.network/ext/bc/C/rpc"
-    elif chain == "destination":  # BSC testnet
+    elif chain == "destination":
         api_url = "https://data-seed-prebsc-1-s1.binance.org:8545/"
     else:
-        raise ValueError(f"Unknown chain: {chain}")
+        raise ValueError("Unknown chain")
 
     w3 = Web3(Web3.HTTPProvider(api_url))
     w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     return w3
 
 
-# ---------------------------------------------------
-# LOAD CONTRACT INFO
-# ---------------------------------------------------
-def get_contract_info(chain, contract_info_file):
+# ---------------------------------------------------------
+# READ CONTRACT INFO
+# ---------------------------------------------------------
+def get_contract_info(chain, file):
     try:
-        with open(contract_info_file, "r") as f:
-            contracts = json.load(f)
+        with open(file, "r") as f:
+            info = json.load(f)
+        return info.get(chain)
     except Exception as e:
-        print(f"Failed to read contract info\nPlease contact your instructor\n{e}")
+        print("Failed to read contract info\nPlease contact your instructor")
+        print(e)
         return None
 
-    return contracts.get(chain)
 
-
-# ---------------------------------------------------
-# LOG EVENTS
-# ---------------------------------------------------
+# ---------------------------------------------------------
+# LOG EVENTS (OPTIONAL)
+# ---------------------------------------------------------
 def log_events(rows, eventfile="bridge_logs.csv"):
     if not rows:
         return
@@ -54,28 +52,24 @@ def log_events(rows, eventfile="bridge_logs.csv"):
         df.to_csv(eventfile, mode="w", header=True, index=False)
 
 
-# ---------------------------------------------------
-# REGISTER TOKENS (placeholder)
-# ---------------------------------------------------
-def register_and_create_tokens(contract_info="contract_info.json"):
-    pass
-
-
-# ---------------------------------------------------
-# MAIN SCAN FUNCTION (merged listener.py + bridge.py)
-# ---------------------------------------------------
+# ---------------------------------------------------------
+# SCAN BLOCKS (MAIN FUNCTION)
+# ---------------------------------------------------------
 def scan_blocks(chain, contract_info_file="contract_info.json"):
 
     if chain not in ["source", "destination"]:
-        print(f"Invalid chain: {chain}")
+        print("Invalid chain")
         return
 
-    # Load info for both chains
+    # Load contracts
     this_info = get_contract_info(chain, contract_info_file)
+    if not this_info:
+        print("Failed to read contract info")
+        return
+
     opp_chain = "destination" if chain == "source" else "source"
     opp_info = get_contract_info(opp_chain, contract_info_file)
-
-    if not this_info or not opp_info:
+    if not opp_info:
         print("Failed to read contract info")
         return
 
@@ -88,6 +82,7 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
         address=Web3.to_checksum_address(this_info["address"]),
         abi=this_info["abi"]
     )
+
     opp_contract = w3_opp.eth.contract(
         address=Web3.to_checksum_address(opp_info["address"]),
         abi=opp_info["abi"]
@@ -97,43 +92,53 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
     opp_key = opp_info["warden_private_key"]
     opp_acct = w3_opp.eth.account.from_key(opp_key)
 
-    # Event & function mapping
+    # Event choosing
     if chain == "source":
-        event_obj = this_contract.events.Deposit
+        event_abi = this_contract.events.Deposit().abi
         target_fn = opp_contract.functions.wrap
     else:
-        event_obj = this_contract.events.Unwrap
+        event_abi = this_contract.events.Unwrap().abi
         target_fn = opp_contract.functions.withdraw
 
     # Block range
     latest = w3.eth.block_number
     start_block = max(0, latest - 5)
 
-    # ---------------------------------------------------
-    # OLD WEB3 v5 METHOD — createFilter
-    # ---------------------------------------------------
+    # ---------------------------------------------------------
+    # OLD WEB3 METHOD: CALL w3.eth.get_logs() DIRECTLY
+    # ---------------------------------------------------------
+    filter_params = {
+        "fromBlock": start_block,
+        "toBlock": latest,
+        "address": Web3.to_checksum_address(this_info["address"])
+    }
+
     try:
-        flt = event_obj.createFilter(fromBlock=start_block, toBlock=latest)
-        events = flt.get_all_entries()
+        logs = w3.eth.get_logs(filter_params)
     except Exception as e:
         print(f"Failed to get events: {e}")
-        events = []
+        logs = []
 
-    print(f"[{chain}] Scanned blocks {start_block}-{latest}, {len(events)} events found.")
+    print(f"[{chain}] Scanned blocks {start_block}-{latest}, {len(logs)} events found.")
 
-    # ---------------------------------------------------
-    # PROCESS EVENTS
-    # ---------------------------------------------------
-    for evt in events:
+    # ---------------------------------------------------------
+    # DECODE LOGS MANUALLY
+    # ---------------------------------------------------------
+    for log in logs:
+        try:
+            evt = this_contract.events.Deposit().process_log(log) \
+                if chain == "source" else \
+                this_contract.events.Unwrap().process_log(log)
+        except:
+            continue  # skip logs not matching event
 
-        # Safe extraction of event fields
         token = evt.args.get("token") or evt.args.get("underlying_token")
         recipient = evt.args["to"]
         amount = evt.args["amount"]
 
-        print(f"[{chain}] Event -> token={token}, to={recipient}, amount={amount}")
+        print(f"[{chain}] Event token={token}, to={recipient}, amount={amount}")
 
-        # Send bridging tx on opposite chain
+        # Send bridging tx
         try:
             nonce = w3_opp.eth.get_transaction_count(opp_acct.address, "pending")
 
@@ -151,7 +156,7 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
             signed = w3_opp.eth.account.sign_transaction(tx, opp_key)
             tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
 
-            print(f"[{opp_chain}] Called {target_fn.fn_name}, tx: {tx_hash.hex()}")
+            print(f"[{opp_chain}] Sent {target_fn.fn_name} tx={tx_hash.hex()}")
 
         except Exception as e:
             print(f"[{opp_chain}] Transaction failed: {e}")
