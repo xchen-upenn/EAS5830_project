@@ -116,7 +116,7 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
 
     # --- FIX #1: use get_logs not create_filter ---
     try:
-        events = event_obj.get_logs(fromBlock=start_block, toBlock=latest)
+        events = event_obj.get_logs(from_block=start_block, to_block=latest)
     except Exception as e:
         print(f"Failed to get events: {e}")
         events = []
