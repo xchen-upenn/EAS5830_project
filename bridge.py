@@ -110,7 +110,7 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
 
     # ----------- Build correct topic array ----------------
     # topic0 + N indexed params (all None)
-    topics = [topic0] + [None] * indexed_count
+    topics = [topic0]
 
     for blk in range(start_block, latest + 1):
         params = {
