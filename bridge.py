@@ -113,20 +113,22 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     # Select event + target function
     # ---------------------------
     if chain == "source":
-        # Deposit(token, recipient, amount)
         event_class = this_contract.events.Deposit
         event_abi = event_class().abi
         target_fn = opp_contract.functions.wrap
         event_name = "Deposit"
     else:
-        # Unwrap(underlying_token, wrapped_token, frm, to, amount)
         event_class = this_contract.events.Unwrap
         event_abi = event_class().abi
         target_fn = opp_contract.functions.withdraw
         event_name = "Unwrap"
 
-    # Event signature for topics[0]
-    topic0 = event_abi["signature"]
+    # -------------------------------------------------
+    # FIX: Manually compute event signature (topic0)
+    # -------------------------------------------------
+    input_types = ",".join(inp["type"] for inp in event_abi["inputs"])
+    signature_text = f"{event_abi['name']}({input_types})"
+    topic0 = Web3.keccak(text=signature_text).hex()
 
     # ---------------------------
     # Block range: last 5 blocks
@@ -137,8 +139,7 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     print(f"[{chain}] Scanning blocks {start_block}-{latest}")
 
     # ---------------------------
-    # Fetch logs block-by-block
-    # WITH topic0 filter (CRITICAL FIX!)
+    # Fetch logs block-by-block WITH topic0 filter
     # ---------------------------
     raw_logs = []
 
@@ -147,7 +148,7 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
             "fromBlock": blk,
             "toBlock": blk,
             "address": Web3.to_checksum_address(this_info["address"]),
-            "topics": [topic0],     # <-- Absolutely required
+            "topics": [topic0],
         }
         try:
             block_logs = w3.eth.get_logs(filter_params)
@@ -181,14 +182,12 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
             recipient = Web3.to_checksum_address(args["recipient"])
             amount = int(args["amount"])
         else:
-            # Unwrap(underlying_token, wrapped_token, frm, to, amount)
             token = Web3.to_checksum_address(args["underlying_token"])
             recipient = Web3.to_checksum_address(args["to"])
             amount = int(args["amount"])
 
         print(f"[{chain}] {event_name}: token={token}, recipient={recipient}, amount={amount}")
 
-        # Build & send transaction
         try:
             nonce = w3_opp.eth.get_transaction_count(opp_acct.address, "pending")
 
@@ -208,6 +207,7 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
             print(f"[{opp_chain}] Transaction failed: {e}")
 
     return 1
+
 
 # Optional manual test
 if __name__ == "__main__":
