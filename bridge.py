@@ -98,51 +98,44 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
         abi=opp_info["abi"]
     )
 
-    # Warden key
+    # Keys
     opp_key = opp_info.get("warden_private_key")
     opp_acct = w3_opp.eth.account.from_key(opp_key)
 
-    # Choose event + target fn
+    # Which event?
     if chain == "source":
-        event_abi = this_contract.events.Deposit._get_event_abi()
+        event_obj = this_contract.events.Deposit
         target_fn = opp_contract.functions.wrap
     else:
-        event_abi = this_contract.events.Unwrap._get_event_abi()
+        event_obj = this_contract.events.Unwrap
         target_fn = opp_contract.functions.withdraw
-
-    # Compute event signature topic
-    event_topic = w3.keccak(text=event_abi["name"] + "(" + ",".join([i["type"] for i in event_abi["inputs"]]) + ")")
 
     # Block range
     latest = w3.eth.block_number
     start_block = max(latest - 5, 0)
 
-    # ---------- REAL FIX: use get_logs() properly ----------
+    # ---- FIXED EVENT QUERY ----
     try:
-        raw_logs = w3.eth.get_logs({
-            "fromBlock": start_block,
-            "toBlock": latest,
-            "address": Web3.to_checksum_address(this_info["address"]),
-            "topics": [event_topic]
-        })
+        events = event_obj.get_logs(
+            fromBlock=start_block,
+            toBlock=latest
+        )
     except Exception as e:
-        print(f"Failed to get logs: {e}")
-        raw_logs = []
-
-    events = [this_contract.events[event_abi["name"]]().process_log(log) for log in raw_logs]
+        print(f"Failed to get events: {e}")
+        events = []
 
     print(f"[{chain}] Scanned blocks {start_block}-{latest}, {len(events)} events found.")
 
-    # ---------- Process events ----------
+    # ---- PROCESS EVENTS ----
     for evt in events:
 
-        token = evt.args[0]
-        recipient = evt.args[1]
-        amount = evt.args[2]
+        # Safe field extraction
+        token = evt.args.get("token") or evt.args.get("underlying_token")
+        recipient = evt.args["to"]
+        amount = evt.args["amount"]
 
         print(f"[{chain}] Event -> token={token}, to={recipient}, amount={amount}")
 
-        # Build & send opposite-chain tx
         try:
             nonce = w3_opp.eth.get_transaction_count(opp_acct.address, "pending")
 
@@ -159,10 +152,10 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
 
             signed = w3_opp.eth.account.sign_transaction(tx, opp_key)
             tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
-
             print(f"[{opp_chain}] Called {target_fn.fn_name}, tx: {tx_hash.hex()}")
 
         except Exception as e:
             print(f"[{opp_chain}] Transaction failed: {e}")
+
 
 
