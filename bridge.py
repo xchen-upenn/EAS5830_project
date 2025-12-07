@@ -48,7 +48,7 @@ def scan_blocks(chain: str, contract_info_file="contract_info.json"):
         print(f"Invalid chain {chain}")
         return 0
 
-    # Load both contract configs
+    # Load contract info
     this_info = get_contract_info(chain, contract_info_file)
     if not this_info:
         print(f"Failed to read contract info for {chain}")
@@ -74,7 +74,7 @@ def scan_blocks(chain: str, contract_info_file="contract_info.json"):
         abi=opp_info["abi"]
     )
 
-    # Opposite chain private key
+    # Opposite chain key
     opp_key = opp_info.get("warden_private_key")
     if not opp_key:
         print(f"No warden_private_key for {opp_chain}")
@@ -82,41 +82,46 @@ def scan_blocks(chain: str, contract_info_file="contract_info.json"):
 
     opp_acct = w3_opp.eth.account.from_key(opp_key)
 
-    # -------------------------------
-    # Event selection
-    # -------------------------------
+    # -----------------------------------------
+    # Select event + target bridge function
+    # -----------------------------------------
     if chain == "source":
         event_class = this_contract.events.Deposit
-        sig = event_class().abi["signature"]   # old-web3 format
         target_fn = opp_contract.functions.wrap
         event_name = "Deposit"
     else:
         event_class = this_contract.events.Unwrap
-        sig = event_class().abi["signature"]
         target_fn = opp_contract.functions.withdraw
         event_name = "Unwrap"
 
-    # MUST keccak hash the signature → topic0
-    topic0 = Web3.keccak(text=sig).hex()
+    # -----------------------------------------
+    # Build event signature manually (CRITICAL)
+    # -----------------------------------------
+    abi = event_class().abi                 # ABI dict for this event
+    ev_name = abi["name"]                   # "Deposit" or "Unwrap"
+    arg_types = ",".join(inp["type"] for inp in abi["inputs"])
+    signature_text = f"{ev_name}({arg_types})"
 
-    # -------------------------------
+    topic0 = Web3.keccak(text=signature_text).hex()
+
+    # -----------------------------------------
     # Block range (last 5)
-    # -------------------------------
+    # -----------------------------------------
     latest = w3.eth.block_number
     start_block = max(0, latest - 5)
 
     print(f"[{chain}] Scanning blocks {start_block}-{latest}")
 
-    # -------------------------------
-    # Manual per-block log fetch
-    # -------------------------------
+    # -----------------------------------------
+    # Fetch logs manually block-by-block
+    # -----------------------------------------
     raw_logs = []
     for blk in range(start_block, latest + 1):
         params = {
             "fromBlock": blk,
             "toBlock": blk,
             "address": Web3.to_checksum_address(this_info["address"]),
-            "topics": [topic0]
+            "topics": [topic0],  # FILTER BY EVENT SIGNATURE
         }
         try:
             logs = w3.eth.get_logs(params)
@@ -126,9 +131,9 @@ def scan_blocks(chain: str, contract_info_file="contract_info.json"):
 
     print(f"[{chain}] {len(raw_logs)} raw logs found.")
 
-    # -------------------------------
+    # -----------------------------------------
     # Decode events
-    # -------------------------------
+    # -----------------------------------------
     decoded = []
     for log in raw_logs:
         try:
@@ -139,9 +144,9 @@ def scan_blocks(chain: str, contract_info_file="contract_info.json"):
 
     print(f"[{chain}] {len(decoded)} {event_name} events decoded.")
 
-    # -------------------------------
+    # -----------------------------------------
     # Process each event
-    # -------------------------------
+    # -----------------------------------------
     for evt in decoded:
         args = evt["args"]
 
@@ -156,8 +161,10 @@ def scan_blocks(chain: str, contract_info_file="contract_info.json"):
 
         print(f"[{chain}] {event_name}: token={token}, recipient={recipient}, amount={amount}")
 
+        # Send bridging tx
         try:
             nonce = w3_opp.eth.get_transaction_count(opp_acct.address, "pending")
+
             tx = target_fn(token, recipient, amount).build_transaction({
                 "from": opp_acct.address,
                 "nonce": nonce,
@@ -176,7 +183,6 @@ def scan_blocks(chain: str, contract_info_file="contract_info.json"):
     return 1
 
 
-# Manual test
 if __name__ == "__main__":
     scan_blocks("source")
     scan_blocks("destination")
