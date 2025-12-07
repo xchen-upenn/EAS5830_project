@@ -151,9 +151,63 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
         }
         try:
             block_logs = w3.eth.get_logs(filter_params)
-            raw_logs.extend(block_log
+            raw_logs.extend(block_logs)
+        except Exception as e:
+            print(f"[{chain}] Warning block {blk}: {e}")
 
+    print(f"[{chain}] {len(raw_logs)} raw logs found.")
 
+    # ---------------------------
+    # Decode logs
+    # ---------------------------
+    decoded = []
+    for log in raw_logs:
+        try:
+            evt = event_class().process_log(log)
+            decoded.append(evt)
+        except Exception:
+            continue
+
+    print(f"[{chain}] {len(decoded)} {event_name} events decoded.")
+
+    # ---------------------------
+    # Process events
+    # ---------------------------
+    for evt in decoded:
+        args = evt["args"]
+
+        if chain == "source":
+            token = Web3.to_checksum_address(args["token"])
+            recipient = Web3.to_checksum_address(args["recipient"])
+            amount = int(args["amount"])
+        else:
+            # Unwrap(underlying_token, wrapped_token, frm, to, amount)
+            token = Web3.to_checksum_address(args["underlying_token"])
+            recipient = Web3.to_checksum_address(args["to"])
+            amount = int(args["amount"])
+
+        print(f"[{chain}] {event_name}: token={token}, recipient={recipient}, amount={amount}")
+
+        # Build & send transaction
+        try:
+            nonce = w3_opp.eth.get_transaction_count(opp_acct.address, "pending")
+
+            tx = target_fn(token, recipient, amount).build_transaction({
+                "from": opp_acct.address,
+                "nonce": nonce,
+                "gas": 500_000,
+                "gasPrice": w3_opp.eth.gas_price,
+            })
+
+            signed = w3_opp.eth.account.sign_transaction(tx, opp_key)
+            tx_hash = w3_opp.eth.send_raw_transaction(signed.raw_transaction)
+
+            print(f"[{opp_chain}] Sent {target_fn.fn_name} tx: {tx_hash.hex()}")
+
+        except Exception as e:
+            print(f"[{opp_chain}] Transaction failed: {e}")
+
+    return 1
 
 # Optional manual test
 if __name__ == "__main__":
