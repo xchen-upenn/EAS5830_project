@@ -209,7 +209,7 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
 
             # Sign & send
             signed = w3_opp.eth.account.sign_transaction(tx, opp_key)
-            tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
+            tx_hash = w3_opp.eth.send_raw_transaction(signed.raw_transaction)
             print(f"[{opp_chain}] Sent {target_fn.fn_name} tx: {tx_hash.hex()}")
 
         except Exception as e:
