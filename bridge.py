@@ -126,9 +126,17 @@ def scan_blocks(chain: str, contract_info_file: str = "contract_info.json"):
     # -------------------------------------------------
     # FIX: Manually compute event signature (topic0)
     # -------------------------------------------------
+    # FIX: Manually compute topic0 and ensure proper hex formatting
     input_types = ",".join(inp["type"] for inp in event_abi["inputs"])
     signature_text = f"{event_abi['name']}({input_types})"
-    topic0 = Web3.keccak(text=signature_text).hex()
+
+    # keccak event signature hash
+    topic0 = Web3.keccak(text=signature_text).hex().lower()
+
+    # enforce 0x prefix (critical for AVAX/BSC RPC nodes)
+    if not topic0.startswith("0x"):
+        topic0 = "0x" + topic0
+
 
     # ---------------------------
     # Block range: last 5 blocks
