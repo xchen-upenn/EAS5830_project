@@ -98,47 +98,52 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
         abi=opp_info["abi"]
     )
 
-    # Keys
+    # Opposite chain key/account
     opp_key = opp_info.get("warden_private_key")
     opp_acct = w3_opp.eth.account.from_key(opp_key)
 
-    # Which event?
+    # Which event is emitted?
     if chain == "source":
         event_obj = this_contract.events.Deposit
-        target_fn = opp_contract.functions.wrap
+        target_function = opp_contract.functions.wrap
     else:
         event_obj = this_contract.events.Unwrap
-        target_fn = opp_contract.functions.withdraw
+        target_function = opp_contract.functions.withdraw
 
-    # Block range
+    # Choose block range
     latest = w3.eth.block_number
-    start_block = max(latest - 5, 0)
+    start_block = max(0, latest - 5)
 
-    # --- FIX #1: use get_logs not create_filter ---
+    # FIX: MUST use dict with camelCase fields
     try:
-        events = event_obj.get_logs(from_block=start_block, to_block=latest)
+        logs = event_obj.get_logs({
+            "fromBlock": start_block,
+            "toBlock": latest
+        })
     except Exception as e:
         print(f"Failed to get events: {e}")
-        events = []
+        logs = []
 
-    print(f"[{chain}] Scanned blocks {start_block}-{latest}, {len(events)} events found.")
+    print(f"[{chain}] Scanned blocks {start_block}-{latest}, {len(logs)} events found.")
 
-    for evt in events:
+    # Process events
+    for evt in logs:
+        args = evt.args
 
-        # --- FIX #2: use positions, not names ---
-        # Deposit(token, to, amount)
-        # Unwrap(underlying_token, to, amount)
-        token = evt.args[0]
-        recipient = evt.args[1]
-        amount = evt.args[2]
+        # Flexible extraction based on the ABI
+        keys = list(args.keys())
 
-        print(f"[{chain}] Event -> token={token}, to={recipient}, amount={amount}")
+        token     = args.get("token") or args.get("_token") or args.get("underlying_token") or args.get("_underlying_token") or args[keys[0]]
+        recipient = args.get("to") or args.get("_to") or args.get("recipient") or args[keys[1]]
+        amount    = args.get("amount") or args.get("_amount") or args[keys[2]]
 
-        # Send transaction
+        print(f"[{chain}] Event: token={token}, to={recipient}, amount={amount}")
+
+        # Build and send transaction on opposite chain
         try:
             nonce = w3_opp.eth.get_transaction_count(opp_acct.address, "pending")
 
-            tx = target_fn(
+            tx = target_function(
                 Web3.to_checksum_address(token),
                 Web3.to_checksum_address(recipient),
                 int(amount)
@@ -151,7 +156,9 @@ def scan_blocks(chain, contract_info_file="contract_info.json"):
 
             signed = w3_opp.eth.account.sign_transaction(tx, opp_key)
             tx_hash = w3_opp.eth.send_raw_transaction(signed.rawTransaction)
-            print(f"[{opp_chain}] Called {target_fn.fn_name}, tx: {tx_hash.hex()}")
+
+            print(f"[{opp_chain}] Sent {target_function.fn_name}, tx hash: {tx_hash.hex()}")
 
         except Exception as e:
             print(f"[{opp_chain}] Transaction failed: {e}")
+
